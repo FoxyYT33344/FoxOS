@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>FoxOS Web Ultimate</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; height: 100vh; background: #000; }
+        #desktop { height: calc(100% - 50px); width: 100%; position: relative; background-size: cover; background-position: center; transition: filter 0.3s; }
+        #taskbar { height: 50px; background: rgba(20, 20, 20, 0.85); backdrop-filter: blur(10px); display: flex; align-items: center; padding: 0 10px; position: fixed; bottom: 0; width: 100%; z-index: 1000; border-top: 1px solid rgba(255,255,255,0.1); }
+        
+        /* UAC & Windows Style */
+        .window { position: absolute; background: #f3f3f3; border-radius: 8px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); display: none; flex-direction: column; overflow: hidden; min-width: 300px; border: 1px solid #999; z-index: 100; }
+        .win-header { background: #fff; padding: 10px; display: flex; justify-content: space-between; align-items: center; cursor: move; border-bottom: 1px solid #ddd; }
+        
+        #uac-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 5000; display: none; justify-content: center; align-items: center; backdrop-filter: grayscale(1); }
+        #uac-prompt { width: 400px; background: #e1e1e1; border: 3px solid #0066cc; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+        
+        #start-menu { position: absolute; bottom: 55px; left: 5px; width: 280px; background: rgba(30, 30, 30, 0.9); backdrop-filter: blur(15px); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; display: none; z-index: 2000; color: white; padding-bottom: 10px; }
+        
+        .btn-start { background: #0078d7; color: white; padding: 8px 15px; border-radius: 5px; font-weight: bold; transition: 0.2s; }
+        .btn-start:active { transform: scale(0.95); }
+        
+        #setup-wizard { position: fixed; inset: 0; background: #0078d7; z-index: 9000; display: none; justify-content: center; align-items: center; color: white; }
+    </style>
+</head>
+<body>
+
+<!-- SETUP WIZARD (OOBE) -->
+<div id="setup-wizard">
+    <div class="bg-white text-black p-8 rounded-2xl shadow-2xl w-full max-w-md mx-4">
+        <h1 class="text-3xl font-bold text-center mb-2">FoxOS Einrichtung</h1>
+        <p class="text-gray-500 text-center mb-8 text-sm">Erstellen Sie das Administrator-Konto</p>
+        
+        <label class="block text-xs font-bold mb-1">BENUTZERNAME</label>
+        <input type="text" id="reg-user" class="w-full p-3 bg-gray-100 rounded-lg mb-4 outline-none focus:ring-2 focus:ring-blue-500" placeholder="z.B. Admin">
+        
+        <label class="block text-xs font-bold mb-1">PASSWORT</label>
+        <input type="password" id="reg-pass" class="w-full p-3 bg-gray-100 rounded-lg mb-8 outline-none focus:ring-2 focus:ring-blue-500" placeholder="Mind. 4 Zeichen">
+        
+        <button onclick="saveInitialSetup()" class="w-full bg-blue-600 text-white p-4 rounded-xl font-bold hover:bg-blue-700 transition">FoxOS starten</button>
+    </div>
+</div>
+
+<!-- UAC OVERLAY -->
+<div id="uac-overlay">
+    <div id="uac-prompt" class="overflow-hidden rounded-sm">
+        <div class="bg-[#0066cc] text-white p-2 flex items-center gap-2 font-bold text-sm">
+            <span>🛡️</span> FoxOS Sicherheit
+        </div>
+        <div class="p-6 bg-[#f0f0f0]">
+            <p class="font-bold mb-4">Möchten Sie zulassen, dass diese App Änderungen an Ihrem Gerät vornimmt?</p>
+            <div class="bg-white/50 p-3 border border-gray-300 rounded mb-4">
+                <p id="uac-app-name" class="font-bold text-blue-800"></p>
+                <p class="text-xs text-gray-500">Verifizierter Herausgeber: FoxOS Kernel</p>
+            </div>
+            
+            <div id="uac-admin-auth" class="hidden mt-4">
+                <label class="text-xs font-bold text-gray-600 mb-1 block">ADMINISTRATOR PIN / PASSWORT</label>
+                <input type="password" id="uac-pin-input" class="w-full p-2 border border-blue-500 outline-none rounded" placeholder="Admin Passwort eingeben">
+            </div>
+            
+            <div id="uac-info-text" class="text-xs text-gray-600 mb-6 italic"></div>
+        </div>
+        <div class="bg-[#e1e1e1] p-4 flex justify-end gap-3 border-t border-gray-300">
+            <button id="uac-yes" class="px-8 py-1.5 bg-gray-200 border border-gray-400 hover:bg-gray-300 text-sm">Zulassen</button>
+            <button onclick="closeUAC()" class="px-8 py-1.5 bg-gray-200 border border-gray-400 hover:bg-gray-300 text-sm">Nicht zulassen</button>
+        </div>
+    </div>
+</div>
+
+<!-- DESKTOP AREA -->
+<div id="desktop">
+    <!-- Einstellungs Fenster -->
+    <div id="win-control" class="window" style="top: 50px; left: 50px; width: 600px; height: 400px;">
+        <div class="win-header">
+            <div class="flex items-center gap-2 text-sm font-bold">🛡️ FoxOSSteuerung</div>
+            <button onclick="closeWin('win-control')" class="text-gray-500 hover:text-red-500 text-xl">✕</button>
+        </div>
+        <div class="flex h-full">
+            <div class="w-40 bg-gray-200 border-r border-gray-300 p-2 space-y-1">
+                <button class="w-full text-left p-2 text-xs font-bold hover:bg-white rounded">Benutzer</button>
+                <button class="w-full text-left p-2 text-xs hover:bg-white rounded">System</button>
+            </div>
+            <div class="flex-1 p-6 overflow-auto">
+                <h2 class="text-xl font-bold mb-4">Benutzerverwaltung</h2>
+                <div class="bg-white border rounded overflow-hidden mb-4">
+                    <table class="w-full text-sm text-left">
+                        <thead class="bg-gray-50 border-b">
+                            <tr><th class="p-2">Name</th><th class="p-2">Admin</th></tr>
+                        </thead>
+                        <tbody id="user-table-body"></tbody>
+                    </table>
+                </div>
+                <button onclick="addNewUser()" class="bg-blue-600 text-white text-xs px-4 py-2 rounded">Neuer Benutzer</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- START MENU -->
+<div id="start-menu">
+    <div class="bg-white/10 p-4 flex items-center gap-3 mb-2">
+        <div class="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-xl">👤</div>
+        <div>
+            <div id="current-user-name" class="font-bold">Admin</div>
+            <div id="current-user-rank" class="text-[10px] opacity-60 tracking-widest uppercase">Administrator</div>
+        </div>
+    </div>
+    <div class="px-2 space-y-1">
+        <div onclick="openApp('FoxOSSteuerung')" class="p-3 hover:bg-white/10 rounded-lg cursor-pointer flex items-center gap-3">
+            <span class="text-blue-400">🛡️</span> FoxOSSteuerung
+        </div>
+        <div onclick="switchUser()" class="p-3 hover:bg-white/10 rounded-lg cursor-pointer flex items-center gap-3">
+            <span class="text-orange-400">👤</span> Benutzer wechseln
+        </div>
+        <hr class="border-white/10 my-2">
+        <div onclick="location.reload()" class="p-3 hover:bg-red-500/20 text-red-400 rounded-lg cursor-pointer flex items-center gap-3">
+            <span>⏻</span> Herunterfahren
+        </div>
+    </div>
+</div>
+
+<div id="taskbar">
+    <button onclick="toggleStart()" class="btn-start">🦊 FoxOS</button>
+    <div class="flex-1"></div>
+    <div id="clock" class="text-white text-xs font-mono tracking-tighter opacity-80">12:00:00</div>
+</div>
+
+<script>
+    // System State
+    let users = JSON.parse(localStorage.getItem('foxos_users')) || [];
+    let activeUserIndex = parseInt(localStorage.getItem('foxos_active_index')) || 0;
+    
+    // Boot Check
+    window.onload = () => {
+        if(users.length === 0) {
+            document.getElementById('setup-wizard').style.display = 'flex';
+        } else {
+            bootSystem();
+        }
+        updateClock();
+        setInterval(updateClock, 1000);
+    };
+
+    function saveInitialSetup() {
+        const u = document.getElementById('reg-user').value;
+        const p = document.getElementById('reg-pass').value;
+        if(u.length < 3 || p.length < 4) return alert("Name/Passwort zu kurz!");
+        
+        users.push({ username: u, pass: p, admin: "yes" });
+        localStorage.setItem('foxos_users', JSON.stringify(users));
+        localStorage.setItem('foxos_active_index', 0);
+        location.reload();
+    }
+
+    function bootSystem() {
+        document.getElementById('setup-wizard').style.display = 'none';
+        const current = users[activeUserIndex];
+        document.getElementById('current-user-name').innerText = current.username;
+        document.getElementById('current-user-rank').innerText = current.admin === "yes" ? "Administrator" : "Standard-Nutzer";
+        renderUserTable();
+    }
+
+    function updateClock() {
+        document.getElementById('clock').innerText = new Date().toLocaleTimeString();
+    }
+
+    function toggleStart() {
+        const m = document.getElementById('start-menu');
+        m.style.display = (m.style.display === 'block') ? 'none' : 'block';
+    }
+
+    function openApp(appName) {
+        toggleStart();
+        if(appName === 'FoxOSSteuerung') {
+            triggerUAC(appName, () => {
+                document.getElementById('win-control').style.display = 'flex';
+            });
+        }
+    }
+
+    function triggerUAC(appName, action) {
+        const current = users[activeUserIndex];
+        const overlay = document.getElementById('uac-overlay');
+        const authDiv = document.getElementById('uac-admin-auth');
+        const info = document.getElementById('uac-info-text');
+        const btn = document.getElementById('uac-yes');
+        const pinInp = document.getElementById('uac-pin-input');
+        
+        document.getElementById('uac-app-name').innerText = appName;
+        overlay.style.display = 'flex';
+        pinInp.value = "";
+
+        if(current.admin === "yes") {
+            authDiv.classList.add('hidden');
+            info.innerText = "Sie sind als Administrator angemeldet. Bestätigen Sie die Ausführung.";
+            btn.onclick = () => { closeUAC(); action(); };
+        } else {
+            authDiv.classList.remove('hidden');
+            info.innerText = "Um fortzufahren, geben Sie das Passwort eines Administrators ein.";
+            // Suche den Admin
+            const adminUser = users.find(u => u.admin === "yes");
+            btn.onclick = () => {
+                if(pinInp.value === adminUser.pass) {
+                    closeUAC();
+                    action();
+                } else {
+                    alert("Falscher Admin-PIN!");
+                }
+            };
+        }
+    }
+
+    function closeUAC() {
+        document.getElementById('uac-overlay').style.display = 'none';
+    }
+
+    function closeWin(id) {
+        document.getElementById(id).style.display = 'none';
+    }
+
+    function renderUserTable() {
+        const body = document.getElementById('user-table-body');
+        body.innerHTML = "";
+        users.forEach((u, i) => {
+            body.innerHTML += `<tr class="border-b">
+                <td class="p-2">${u.username} ${activeUserIndex === i ? '(Ich)' : ''}</td>
+                <td class="p-2">${u.admin === "yes" ? '✅' : '❌'}</td>
+            </tr>`;
+        });
+    }
+
+    function addNewUser() {
+        const name = prompt("Name des neuen Benutzers:");
+        if(name) {
+            users.push({ username: name, pass: "1234", admin: "no" });
+            localStorage.setItem('foxos_users', JSON.stringify(users));
+            renderUserTable();
+        }
+    }
+
+    function switchUser() {
+        toggleStart();
+        const names = users.map(u => u.username).join(", ");
+        const target = prompt("Zu welchem User wechseln?\nVerfügbar: " + names);
+        const idx = users.findIndex(u => u.username === target);
+        if(idx !== -1) {
+            localStorage.setItem('foxos_active_index', idx);
+            location.reload();
+        } else if(target) {
+            alert("Benutzer nicht gefunden.");
+        }
+    }
+
+    // Fenster verschieben (Basic)
+    let isDragging = false;
+    document.querySelector('.win-header').onmousedown = () => isDragging = true;
+    window.onmouseup = () => isDragging = false;
+    window.onmousemove = (e) => {
+        if(isDragging) {
+            const win = document.getElementById('win-control');
+            win.style.left = (e.clientX - 200) + 'px';
+            win.style.top = (e.clientY - 20) + 'px';
+        }
+    };
+</script>
+
+</body>
+  </html>
